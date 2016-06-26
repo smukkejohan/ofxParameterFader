@@ -491,8 +491,6 @@ void ofxParameterFader::parseOscMessageForParameterGroup(ofxOscMessage & msg, of
             }
         }
     }
-    
-    
 }
 
 
