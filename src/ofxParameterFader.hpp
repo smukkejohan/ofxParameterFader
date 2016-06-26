@@ -1,5 +1,5 @@
 //
-//  ParameterFade.hpp
+//  ParameterFader.hpp
 //  ofStereo2016
 //
 //  Created by Johan Bichel Lindegaard on 2/25/16.
@@ -11,7 +11,7 @@
 
 #include "ofMain.h"
 #include "ofxEasing.h"
-
+#include "ofxOsc.h"
 
 class AbstractParameterFade {
 public:
@@ -110,22 +110,24 @@ private:
     
 };
 
-class ofxParameterFadeManager {
+class ofxParameterFader {
 public:
     
     static const std::map<string, ofxeasing::function> EaseFunctions;
     bool hasEaseFunction(string easeFunctionName);
     ofxeasing::function getEaseFunction(string easeFunctionName);
 
-    ofxParameterFadeManager() {
+    ofxParameterFader() {
     }
     
-    ~ofxParameterFadeManager() {
+    ~ofxParameterFader() {
     }
     
     void update();
     void add(AbstractParameterFade * fade);
     bool isFadingParameter(const ofAbstractParameter & parameter);
+    
+    void parseOscMessageForParameterGroup(ofxOscMessage & msg, ofAbstractParameter * _p);
     
 private:
     vector<AbstractParameterFade *> parameterFades;

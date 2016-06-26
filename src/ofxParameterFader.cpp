@@ -5,9 +5,9 @@
 //  Created by Johan Bichel Lindegaard on 2/25/16.
 //
 
-#include "ParameterFade.hpp"
+#include "ofxParameterFader.hpp"
 
-void ofxParameterFadeManager::update() {
+void ofxParameterFader::update() {
     
     //cout<<"updating: "<< parameterFades.size() << " fades"<<endl;
     
@@ -29,7 +29,7 @@ void ofxParameterFadeManager::update() {
     }
 }
 
-bool ofxParameterFadeManager::isFadingParameter(const ofAbstractParameter & p) {
+bool ofxParameterFader::isFadingParameter(const ofAbstractParameter & p) {
     for(auto fade : parameterFades) {
         if(fade->p == &p) {
             return true;
@@ -38,7 +38,7 @@ bool ofxParameterFadeManager::isFadingParameter(const ofAbstractParameter & p) {
     return false;
 }
 
-void ofxParameterFadeManager::add(AbstractParameterFade * newFade) {
+void ofxParameterFader::add(AbstractParameterFade * newFade) {
         
     for(auto & fade : parameterFades) {
             if(fade->p == newFade->p) {
@@ -52,11 +52,11 @@ void ofxParameterFadeManager::add(AbstractParameterFade * newFade) {
     parameterFades.push_back(newFade);
 }
 
-bool ofxParameterFadeManager::hasEaseFunction(string easeFunctionName) {
+bool ofxParameterFader::hasEaseFunction(string easeFunctionName) {
     return (EaseFunctions.find(easeFunctionName) != EaseFunctions.end());
 }
 
-ofxeasing::function ofxParameterFadeManager::getEaseFunction(string easeFunctionName) {
+ofxeasing::function ofxParameterFader::getEaseFunction(string easeFunctionName) {
     
     if(hasEaseFunction(easeFunctionName)) {
        return EaseFunctions.find(easeFunctionName)->second;
@@ -244,12 +244,262 @@ void ParameterFade<ofVec2f>::updateValue(float t) {
     
 }
 
+void ofxParameterFader::parseOscMessageForParameterGroup(ofxOscMessage & msg, ofAbstractParameter * _p) {
+    
+    ofAbstractParameter * p = _p;
+    //cout<<"Received "<<msg.getAddress()<<endl;
+    vector<string> address = ofSplitString(msg.getAddress(),"/",true);
+    // fade
+    
+    // get fade method that takes the number of expected arguments before the keyword
+    // 1 for sliders
+    
+    bool fadeValue = false;
+    float fadeTime = 2.0; // optional fade time
+    ofxeasing::function easeFn = ofxeasing::linear::easeIn;
+    // add optional fade ease function - default linear
+    // optional wait param
+    
+    // loop through all arguments
+    // if string f - next argument is time if its a float
+    // if string e - next argument matches a lookup for easing functions if its an int
+    // if string from - next argument is the value to start the fade from
+    
+    for(int i=0; i<msg.getNumArgs(); i++) {
+        //cout<<msg.getArgAsString(i)<<endl;
+        
+        if(msg.getArgType(i) == OFXOSC_TYPE_STRING) {
+            if(msg.getArgAsString(i) == "fade") {
+                fadeValue = true;
+                if(msg.getNumArgs() > i+1) {
+                    if(msg.getArgType(i+1) == OFXOSC_TYPE_FLOAT) {
+                        fadeTime = msg.getArgAsFloat(i+1);
+                    } else if( msg.getArgType(i+1) == OFXOSC_TYPE_INT32) {
+                        fadeTime = msg.getArgAsInt(i+1);
+                    }
+                }
+            } else if (hasEaseFunction(msg.getArgAsString(i))){
+                //cout<<msg.getArgAsString(i)<<endl;
+                easeFn = getEaseFunction(msg.getArgAsString(i));
+            }
+        }
+    }
+    
+    for(unsigned int i=0;i<address.size();i++){
+        
+        if(p) {
+            if(address[i]==p->getEscapedName()){
+                
+                if(p->type()==typeid(ofParameterGroup).name()){
+                    if(address.size()>=i+1){
+                        p = &static_cast<ofParameterGroup*>(p)->get(address[i+1]);
+                        
+                    }
+                }else if(p->type()==typeid(ofParameter<int>).name() && msg.getArgType(0)==OFXOSC_TYPE_INT32){
+                    
+                    if(fadeValue) {
+                        add(new ParameterFade<int>(p, msg.getArgAsInt32(0), fadeTime, easeFn));
+                    } else {
+                        p->cast<int>() = msg.getArgAsInt32(0);
+                    }
+                    
+                }else if(p->type()==typeid(ofParameter<float>).name() && msg.getArgType(0)==OFXOSC_TYPE_FLOAT){
+                    if(fadeValue) {
+                        add(new ParameterFade<float>(p, msg.getArgAsFloat(0), fadeTime, easeFn));
+                    } else {
+                        p->cast<float>() = msg.getArgAsFloat(0);
+                    }
+                    
+                }else if(p->type()==typeid(ofParameter<double>).name() && msg.getArgType(0)==OFXOSC_TYPE_DOUBLE){
+                    if(fadeValue) {
+                        add(new ParameterFade<double>(p, msg.getArgAsDouble(0), fadeTime, easeFn));
+                    } else {
+                        p->cast<double>() = msg.getArgAsDouble(0);
+                    }
+                    
+                }else if(p->type()==typeid(ofParameter<bool>).name() && (msg.getArgType(0)==OFXOSC_TYPE_TRUE
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_FALSE
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_INT32
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_INT64
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_FLOAT
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_DOUBLE
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_STRING
+                                                                         || msg.getArgType(0)==OFXOSC_TYPE_SYMBOL)){
+                    
+                    // Bool doesn't fade
+                    p->cast<bool>() = msg.getArgAsBool(0);
+                    
+                } else if(p->type()==typeid(ofParameter<ofColor>).name() &&
+                          msg.getArgType(0)!=OFXOSC_TYPE_STRING ) {
+                    
+                    ofColor col = p->cast<ofColor>();
+                    float val = msg.getArgAsFloat(0);
+                    
+                    // size check
+                    string suf = address.back();
+                    
+                    if(suf == "r") {
+                        col.r = val;
+                    } else if(suf == "g") {
+                        col.g = val;
+                    } else if(suf == "b") {
+                        col.b = val;
+                    } else if(suf == "a") {
+                        col.a = val;
+                    }
+                    
+                    if(fadeValue) {
+                        add(new ParameterFade<ofColor>(p, col, fadeTime, easeFn, suf));
+                    } else {
+                        p->cast<ofColor>().set(col);
+                    }
+                    break;
+                    
+                } else if(p->type()==typeid(ofParameter<ofFloatColor>).name() &&
+                          msg.getArgType(0)!=OFXOSC_TYPE_STRING ) {
+                    
+                    ofFloatColor col = p->cast<ofFloatColor>();
+                    float val = msg.getArgAsFloat(0);
+                    
+                    // size check
+                    string suf = address.back();
+                    
+                    if(suf == "r") {
+                        col.r = val;
+                    } else if(suf == "g") {
+                        col.g = val;
+                    } else if(suf == "b") {
+                        col.b = val;
+                    } else if(suf == "a") {
+                        col.a = val;
+                    }
+                    
+                    if(fadeValue) {
+                        add(new ParameterFade<ofFloatColor>(p, col, fadeTime, easeFn, suf));
+                    } else {
+                        p->cast<ofFloatColor>().set(col);
+                    }
+                    break;
+                    
+                    
+                } else if(p->type()==typeid(ofParameter<ofVec3f>).name() &&
+                          msg.getArgType(0)!=OFXOSC_TYPE_STRING ) {
+                    
+                    ofVec3f vec = p->cast<ofVec3f>();
+                    float val = msg.getArgAsFloat(0);
+                    
+                    // size check
+                    string suf = address.back();
+                    
+                    // TODO: first time with a suffix all others are set to null, when loaded from file. when all set via osc, suf retains others. maybe loading from file fails to set a certain state?
+                    
+                    if(suf == "x") {
+                        vec.x = val;
+                    } else if(suf == "y") {
+                        vec.y = val;
+                    } else if(suf == "z") {
+                        vec.z = val;
+                    }
+                    
+                    if(fadeValue) {
+                        add(new ParameterFade<ofVec3f>(p, vec, fadeTime, easeFn, suf));
+                    } else {
+                        p->cast<ofVec3f>().set(vec);
+                    }
+                    break;
+                    
+                } else if(p->type()==typeid(ofParameter<ofVec2f>).name() &&
+                          msg.getArgType(0)!=OFXOSC_TYPE_STRING ) {
+                    
+                    ofVec2f vec = p->cast<ofVec2f>();
+                    float val = msg.getArgAsFloat(0);
+                    
+                    // size check
+                    string suf = address.back();
+                    
+                    if(suf == "x") {
+                        vec.x = val;
+                    } else if(suf == "y") {
+                        vec.y = val;
+                    }
+                    
+                    if(fadeValue) {
+                        add(new ParameterFade<ofVec2f>(p, vec, fadeTime, easeFn, suf));
+                    } else {
+                        p->cast<ofVec2f>().set(vec);
+                    }
+                    break;
+                    
+                    
+                    
+                } else if(msg.getArgType(0)==OFXOSC_TYPE_STRING){
+                    
+                    if(fadeValue) {
+                        
+                        if(p->type()==typeid(ofParameter<ofColor>).name()) {
+                            
+                            ofParameter<ofColor> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<ofColor>(p, target.get(), fadeTime, easeFn));
+                            
+                        } else if(p->type()==typeid(ofParameter<ofFloatColor>).name()) {
+                            
+                            ofParameter<ofFloatColor> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<ofFloatColor>(p, target.get(), fadeTime, easeFn));
+                            
+                        } else if(p->type()==typeid(ofParameter<ofVec3f>).name()) {
+                            
+                            ofParameter<ofVec3f> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<ofVec3f>(p, target.get(), fadeTime, easeFn));
+                            
+                        } else if(p->type()==typeid(ofParameter<ofVec2f>).name()) {
+                            
+                            ofParameter<ofVec2f> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<ofVec2f>(p, target.get(), fadeTime, easeFn));
+                        }
+                        
+                        // Qlab will pass arguments as strings, if there's a following fade string, therefore we catch floats, ints and doubles here as well
+                        
+                        else if(p->type()==typeid(ofParameter<float>).name()) {
+                            
+                            ofParameter<float> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<float>(p, target.get(), fadeTime, easeFn));
+                            
+                        } else if(p->type()==typeid(ofParameter<double>).name()) {
+                            
+                            ofParameter<double> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<double>(p, target.get(), fadeTime, easeFn));
+                            
+                        } else if(p->type()==typeid(ofParameter<int>).name()) {
+                            
+                            ofParameter<int> target;
+                            target.fromString(msg.getArgAsString(0));
+                            add(new ParameterFade<int>(p, target.get(), fadeTime, easeFn));
+                        }
+                        
+                        
+                    } else {
+                        p->fromString(msg.getArgAsString(0));
+                    }
+                    
+                }
+            }
+        }
+    }
+    
+    
+}
 
 
 using namespace ofxeasing;
 
 // easing lookup from http://easings.net/
-const std::map<string, ofxeasing::function> ofxParameterFadeManager::EaseFunctions {
+const std::map<string, ofxeasing::function> ofxParameterFader::EaseFunctions {
     {"linear",           linear::easeIn},
     
     {"easeInSine",       sine::easeIn},
