@@ -129,9 +129,26 @@ public:
     
     void parseOscMessageForParameterGroup(ofxOscMessage & msg, ofAbstractParameter * _p);
     
+    
+    static string getOscAddressForParameter(const ofAbstractParameter& p) {
+        
+        string a("/");
+        vector<string> h = p.getGroupHierarchyNames();
+        
+        for( auto s : h) {
+            a += s;
+            if (s != h.back()) a += "/";
+        }
+        if(p.type() == typeid(ofParameter<bool>).name()){
+            a += " " + p.toString();
+        } else {
+            a += " \"" + p.toString() + "\"";
+        }
+        return a;
+    }
+    
 private:
     vector<AbstractParameterFade *> parameterFades;
-    
 };
 
 
